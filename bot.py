@@ -18,7 +18,9 @@ def load_stats():
             return json.load(f)
     return {
         "today_deps": 0, "today_sum": 0.0,
+        "today_installs": 0, "today_regs": 0,
         "total_deps": 0, "total_sum": 0.0,
+        "total_installs": 0, "total_regs": 0,
         "last_reset": str(date.today()),
         "cabs": {}, "creos": {}, "statuses": {}, "dolets": 0,
         "campaigns": {}, "offers": {},
@@ -59,11 +61,12 @@ def get_keyboard():
 
 def send_daily_report():
     yesterday = date.today() - timedelta(days=1)
-    msg = f"""📋 <b>Статистика за {yesterday}</b>
+    msg = f"""📋 <b>Отчёт за {yesterday}</b>
 
-Депов: <b>{stats['today_deps']}</b>
-Сумма: <b>{stats['today_sum']:.2f}</b>
-Долетов: {stats.get('dolets', 0)}
+💰 Депов: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
+📲 Инсталов: <b>{stats.get('today_installs', 0)}</b>
+📝 Регистраций: <b>{stats.get('today_regs', 0)}</b>
+✈️ Долетов: {stats.get('dolets', 0)}
 
 <b>Кампании:</b>
 """
@@ -74,20 +77,19 @@ def send_daily_report():
     for off, data in sorted(stats.get("offers", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:10]:
         msg += f"• {off}: {data['count']} / {data['sum']:.2f}\n"
     
-    msg += "\n✅ Новый день начался. Статистика обнулена."
+    msg += "\n✅ Новый день начался."
     send_message(msg)
 
 def reset_daily():
     global stats
     today = str(date.today())
     if stats.get("last_reset") != today:
-        # Сначала отправляем отчёт за вчера
         if stats.get("today_deps", 0) > 0 or stats.get("today_sum", 0) > 0:
             send_daily_report()
-        
-        # Потом обнуляем
         stats["today_deps"] = 0
         stats["today_sum"] = 0.0
+        stats["today_installs"] = 0
+        stats["today_regs"] = 0
         stats["last_reset"] = today
         save_stats(stats)
 
@@ -114,22 +116,40 @@ def check_alerts():
         except:
             pass
 
-def full_stats_text():
+def short_stats():
     reset_daily()
-    msg = f"""📊 <b>Полная статистика</b>
+    return f"""📊 <b>Статистика за сегодня</b>
 
-📅 Сегодня: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
-📈 Всего: <b>{stats['total_deps']}</b> / <b>{stats['total_sum']:.2f}</b>
+💰 Депов: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
+📲 Инсталов: <b>{stats.get('today_installs', 0)}</b>
+📝 Рег: <b>{stats.get('today_regs', 0)}</b>
+"""
+
+def full_report():
+    reset_daily()
+    msg = f"""📋 <b>Подробный отчёт</b>
+
+💰 Депов сегодня: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
+📲 Инсталов: <b>{stats.get('today_installs', 0)}</b>
+📝 Регистраций: <b>{stats.get('today_regs', 0)}</b>
 ✈️ Долетов: {stats.get('dolets', 0)}
 
-<b>Кампании:</b>
+📈 Всего депов: {stats['total_deps']} / {stats['total_sum']:.2f}
+📲 Всего инсталов: {stats.get('total_installs', 0)}
+📝 Всего рег: {stats.get('total_regs', 0)}
+
+<b>Топ кампаний:</b>
 """
-    for camp, data in sorted(stats.get("campaigns", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:10]:
+    for camp, data in sorted(stats.get("campaigns", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:8]:
         msg += f"• {camp}: {data['count']} / {data['sum']:.2f}\n"
     
-    msg += "\n<b>Офферы:</b>\n"
-    for off, data in sorted(stats.get("offers", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:10]:
+    msg += "\n<b>Топ офферов:</b>\n"
+    for off, data in sorted(stats.get("offers", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:8]:
         msg += f"• {off}: {data['count']} / {data['sum']:.2f}\n"
+    
+    msg += "\n<b>Топ кабинетов:</b>\n"
+    for cab, data in sorted(stats.get("cabs", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:8]:
+        msg += f"• {cab}: {data['count']} / {data['sum']:.2f}\n"
     
     return msg
 
@@ -156,6 +176,14 @@ def postback():
         rev = float(revenue)
     except:
         rev = 0.0
+    
+    # Считаем инсталы и реги по статусу
+    if status in ['install', 'inst', 'download']:
+        stats["today_installs"] = stats.get("today_installs", 0) + 1
+        stats["total_installs"] = stats.get("total_installs", 0) + 1
+    elif status in ['registration', 'reg', 'lead', 'signup']:
+        stats["today_regs"] = stats.get("today_regs", 0) + 1
+        stats["total_regs"] = stats.get("total_regs", 0) + 1
     
     stats["last_dep_time"] = datetime.now().isoformat()
     
@@ -202,18 +230,19 @@ def postback():
     
     save_stats(stats)
     
-    status_emoji = {"sale": "💰", "deposit": "💰", "dep": "💰", "lead": "📝", "registration": "📋"}.get(status, "📌")
+    status_emoji = {"sale": "💰", "deposit": "💰", "dep": "💰", "lead": "📝", "registration": "📋", "install": "📲"}.get(status, "📌")
     
     text = f"""{status_emoji} <b>Новый {status.upper()}!</b>
 
-💵 Сумма депа: <b>{revenue}</b>
+💵 Сумма: <b>{revenue}</b>
 🏢 Кампания: <b>{campaign}</b>
 🎯 Оффер: <b>{offer}</b>
 📊 Кабинет: <b>{cabinet}</b>
 🎨 Крео: <b>{creo}</b>
 🆔 SubID: <code>{subid}</code>
 
-📅 Сегодня: {stats['today_deps']} / {stats['today_sum']:.2f}
+📅 Сегодня: {stats['today_deps']} депов / {stats['today_sum']:.2f}
+📲 Инсталов: {stats.get('today_installs', 0)} | 📝 Рег: {stats.get('today_regs', 0)}
 """
     
     send_message(text)
@@ -237,8 +266,11 @@ def webhook():
     if text in ['/start', 'Старт']:
         send_message("Бот запущен!", get_keyboard())
     
-    elif text in ['/stats', 'Статистика', 'Отчёт', '/report']:
-        send_message(full_stats_text(), get_keyboard())
+    elif text in ['Статистика', '/stats', '/today']:
+        send_message(short_stats(), get_keyboard())
+    
+    elif text in ['Отчёт', '/report']:
+        send_message(full_report(), get_keyboard())
     
     elif text in ['Кампании', '/campaigns']:
         msg = "🏢 <b>По кампаниям:</b>\n\n"
@@ -267,12 +299,13 @@ def webhook():
     elif text in ['Очистить', '/clear']:
         stats = {
             "today_deps": 0, "today_sum": 0.0,
+            "today_installs": 0, "today_regs": 0,
             "total_deps": 0, "total_sum": 0.0,
+            "total_installs": 0, "total_regs": 0,
             "last_reset": str(date.today()),
             "cabs": {}, "creos": {}, "statuses": {}, "dolets": 0,
             "campaigns": {}, "offers": {},
-            "last_dep_time": None,
-            "cab_history": {}
+            "last_dep_time": None, "cab_history": {}
         }
         save_stats(stats)
         send_message("✅ Статистика очищена", get_keyboard())
