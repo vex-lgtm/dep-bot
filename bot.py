@@ -3,6 +3,8 @@ import json
 import requests
 from flask import Flask, request
 from datetime import datetime, date, timedelta
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -39,7 +41,10 @@ def send_message(text, reply_markup=None):
     }
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
-    requests.post(url, data=payload)
+    try:
+        requests.post(url, data=payload, timeout=10)
+    except:
+        pass
 
 def get_keyboard():
     return {
@@ -52,13 +57,49 @@ def get_keyboard():
         "resize_keyboard": True
     }
 
-def reset_if_new_day():
+def send_daily_report():
+    yesterday = date.today() - timedelta(days=1)
+    msg = f"""📋 <b>Статистика за {yesterday}</b>
+
+Депов: <b>{stats['today_deps']}</b>
+Сумма: <b>{stats['today_sum']:.2f}</b>
+Долетов: {stats.get('dolets', 0)}
+
+<b>Кампании:</b>
+"""
+    for camp, data in sorted(stats.get("campaigns", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:10]:
+        msg += f"• {camp}: {data['count']} / {data['sum']:.2f}\n"
+    
+    msg += "\n<b>Офферы:</b>\n"
+    for off, data in sorted(stats.get("offers", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:10]:
+        msg += f"• {off}: {data['count']} / {data['sum']:.2f}\n"
+    
+    msg += "\n✅ Новый день начался. Статистика обнулена."
+    send_message(msg)
+
+def reset_daily():
+    global stats
     today = str(date.today())
     if stats.get("last_reset") != today:
+        # Сначала отправляем отчёт за вчера
+        if stats.get("today_deps", 0) > 0 or stats.get("today_sum", 0) > 0:
+            send_daily_report()
+        
+        # Потом обнуляем
         stats["today_deps"] = 0
         stats["today_sum"] = 0.0
         stats["last_reset"] = today
         save_stats(stats)
+
+def midnight_checker():
+    while True:
+        now = datetime.now()
+        if now.hour == 0 and now.minute == 0:
+            reset_daily()
+            time.sleep(70)
+        time.sleep(20)
+
+threading.Thread(target=midnight_checker, daemon=True).start()
 
 def check_alerts():
     now = datetime.now()
@@ -74,7 +115,7 @@ def check_alerts():
             pass
 
 def full_stats_text():
-    reset_if_new_day()
+    reset_daily()
     msg = f"""📊 <b>Полная статистика</b>
 
 📅 Сегодня: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
@@ -95,7 +136,7 @@ def full_stats_text():
 @app.route('/postback', methods=['GET', 'POST'])
 def postback():
     global stats
-    reset_if_new_day()
+    reset_daily()
     check_alerts()
     
     data = request.args.to_dict()
@@ -191,7 +232,7 @@ def webhook():
     if chat_id != CHAT_ID:
         return "ok"
     
-    reset_if_new_day()
+    reset_daily()
     
     if text in ['/start', 'Старт']:
         send_message("Бот запущен!", get_keyboard())
