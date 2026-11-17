@@ -18,9 +18,9 @@ def load_stats():
             return json.load(f)
     return {
         "today_deps": 0, "today_sum": 0.0,
-        "today_installs": 0, "today_regs": 0,
+        "today_regs": 0,
         "total_deps": 0, "total_sum": 0.0,
-        "total_installs": 0, "total_regs": 0,
+        "total_regs": 0,
         "last_reset": str(date.today()),
         "cabs": {}, "creos": {}, "statuses": {}, "dolets": 0,
         "campaigns": {}, "offers": {},
@@ -64,7 +64,6 @@ def send_daily_report():
     msg = f"""📋 <b>Отчёт за {yesterday}</b>
 
 💰 Депов: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
-📲 Инсталов: <b>{stats.get('today_installs', 0)}</b>
 📝 Регистраций: <b>{stats.get('today_regs', 0)}</b>
 ✈️ Долетов: {stats.get('dolets', 0)}
 
@@ -88,7 +87,6 @@ def reset_daily():
             send_daily_report()
         stats["today_deps"] = 0
         stats["today_sum"] = 0.0
-        stats["today_installs"] = 0
         stats["today_regs"] = 0
         stats["last_reset"] = today
         save_stats(stats)
@@ -121,7 +119,6 @@ def short_stats():
     return f"""📊 <b>Статистика за сегодня</b>
 
 💰 Депов: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
-📲 Инсталов: <b>{stats.get('today_installs', 0)}</b>
 📝 Рег: <b>{stats.get('today_regs', 0)}</b>
 """
 
@@ -130,12 +127,10 @@ def full_report():
     msg = f"""📋 <b>Подробный отчёт</b>
 
 💰 Депов сегодня: <b>{stats['today_deps']}</b> / <b>{stats['today_sum']:.2f}</b>
-📲 Инсталов: <b>{stats.get('today_installs', 0)}</b>
 📝 Регистраций: <b>{stats.get('today_regs', 0)}</b>
 ✈️ Долетов: {stats.get('dolets', 0)}
 
 📈 Всего депов: {stats['total_deps']} / {stats['total_sum']:.2f}
-📲 Всего инсталов: {stats.get('total_installs', 0)}
 📝 Всего рег: {stats.get('total_regs', 0)}
 
 <b>Топ кампаний:</b>
@@ -177,49 +172,53 @@ def postback():
     except:
         rev = 0.0
     
-    # Считаем инсталы и реги по статусу
-    if status in ['install', 'inst', 'download']:
-        stats["today_installs"] = stats.get("today_installs", 0) + 1
-        stats["total_installs"] = stats.get("total_installs", 0) + 1
-    elif status in ['registration', 'reg', 'lead', 'signup']:
+    is_dep = status in ['sale', 'deposit', 'dep']
+    is_reg = status in ['lead', 'registration', 'reg', 'signup']
+    
+    if is_reg:
         stats["today_regs"] = stats.get("today_regs", 0) + 1
         stats["total_regs"] = stats.get("total_regs", 0) + 1
     
-    stats["last_dep_time"] = datetime.now().isoformat()
-    
-    stats["today_deps"] += 1
-    stats["today_sum"] += rev
-    stats["total_deps"] += 1
-    stats["total_sum"] += rev
+    if is_dep or rev > 0:
+        stats["last_dep_time"] = datetime.now().isoformat()
+        stats["today_deps"] += 1
+        stats["today_sum"] += rev
+        stats["total_deps"] += 1
+        stats["total_sum"] += rev
     
     if campaign not in stats["campaigns"]:
         stats["campaigns"][campaign] = {"count": 0, "sum": 0.0}
-    stats["campaigns"][campaign]["count"] += 1
-    stats["campaigns"][campaign]["sum"] += rev
+    if is_dep or rev > 0:
+        stats["campaigns"][campaign]["count"] += 1
+        stats["campaigns"][campaign]["sum"] += rev
     
     if offer not in stats["offers"]:
         stats["offers"][offer] = {"count": 0, "sum": 0.0}
-    stats["offers"][offer]["count"] += 1
-    stats["offers"][offer]["sum"] += rev
+    if is_dep or rev > 0:
+        stats["offers"][offer]["count"] += 1
+        stats["offers"][offer]["sum"] += rev
     
     if cabinet not in stats["cabs"]:
         stats["cabs"][cabinet] = {"count": 0, "sum": 0.0}
-    stats["cabs"][cabinet]["count"] += 1
-    stats["cabs"][cabinet]["sum"] += rev
+    if is_dep or rev > 0:
+        stats["cabs"][cabinet]["count"] += 1
+        stats["cabs"][cabinet]["sum"] += rev
     
     if cabinet not in stats["cab_history"]:
         stats["cab_history"][cabinet] = []
-    stats["cab_history"][cabinet].append(stats["cabs"][cabinet]["count"])
-    if len(stats["cab_history"][cabinet]) > 6:
-        recent = stats["cab_history"][cabinet][-3:]
-        older = stats["cab_history"][cabinet][-6:-3]
-        if older and sum(older) > 5 and sum(recent) < sum(older) * 0.4:
-            send_message(f"⚠️ <b>Алерт:</b> Кабинет <b>{cabinet}</b> резко просел!")
+    if is_dep or rev > 0:
+        stats["cab_history"][cabinet].append(stats["cabs"][cabinet]["count"])
+        if len(stats["cab_history"][cabinet]) > 6:
+            recent = stats["cab_history"][cabinet][-3:]
+            older = stats["cab_history"][cabinet][-6:-3]
+            if older and sum(older) > 5 and sum(recent) < sum(older) * 0.4:
+                send_message(f"⚠️ <b>Алерт:</b> Кабинет <b>{cabinet}</b> резко просел!")
     
     if creo not in stats["creos"]:
         stats["creos"][creo] = {"count": 0, "sum": 0.0}
-    stats["creos"][creo]["count"] += 1
-    stats["creos"][creo]["sum"] += rev
+    if is_dep or rev > 0:
+        stats["creos"][creo]["count"] += 1
+        stats["creos"][creo]["sum"] += rev
     
     if status not in stats["statuses"]:
         stats["statuses"][status] = 0
@@ -230,9 +229,15 @@ def postback():
     
     save_stats(stats)
     
-    status_emoji = {"sale": "💰", "deposit": "💰", "dep": "💰", "lead": "📝", "registration": "📋", "install": "📲"}.get(status, "📌")
+    status_emoji = {
+        "sale": "💰", "deposit": "💰", "dep": "💰",
+        "lead": "📝", "registration": "📋", "reg": "📋",
+        "rejected": "❌", "trash": "🗑"
+    }.get(status, "📌")
     
-    text = f"""{status_emoji} <b>Новый {status.upper()}!</b>
+    action = "ДЕП" if (is_dep or rev > 0) else ("РЕГА" if is_reg else status.upper())
+    
+    text = f"""{status_emoji} <b>Новый {action}!</b>
 
 💵 Сумма: <b>{revenue}</b>
 🏢 Кампания: <b>{campaign}</b>
@@ -240,9 +245,10 @@ def postback():
 📊 Кабинет: <b>{cabinet}</b>
 🎨 Крео: <b>{creo}</b>
 🆔 SubID: <code>{subid}</code>
+📌 Статус: {status}
 
 📅 Сегодня: {stats['today_deps']} депов / {stats['today_sum']:.2f}
-📲 Инсталов: {stats.get('today_installs', 0)} | 📝 Рег: {stats.get('today_regs', 0)}
+📝 Рег: {stats.get('today_regs', 0)}
 """
     
     send_message(text)
@@ -299,9 +305,9 @@ def webhook():
     elif text in ['Очистить', '/clear']:
         stats = {
             "today_deps": 0, "today_sum": 0.0,
-            "today_installs": 0, "today_regs": 0,
+            "today_regs": 0,
             "total_deps": 0, "total_sum": 0.0,
-            "total_installs": 0, "total_regs": 0,
+            "total_regs": 0,
             "last_reset": str(date.today()),
             "cabs": {}, "creos": {}, "statuses": {}, "dolets": 0,
             "campaigns": {}, "offers": {},
