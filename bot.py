@@ -24,9 +24,9 @@ def load_stats():
         "cab_history": {}
     }
 
-def save_stats(stats):
+def save_stats(data):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
-        json.dump(stats, f, ensure_ascii=False, indent=2)
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 stats = load_stats()
 
@@ -62,14 +62,16 @@ def reset_if_new_day():
 
 def check_alerts():
     now = datetime.now()
-    # Алерт: нет депов больше часа
     last = stats.get("last_dep_time")
     if last:
-        last_dt = datetime.fromisoformat(last)
-        if now - last_dt > timedelta(hours=1):
-            send_message("⚠️ <b>Алерт:</b> Уже больше часа нет ни одного депа!")
-            stats["last_dep_time"] = now.isoformat()  # чтобы не спамил
-            save_stats(stats)
+        try:
+            last_dt = datetime.fromisoformat(last)
+            if now - last_dt > timedelta(hours=1):
+                send_message("⚠️ <b>Алерт:</b> Уже больше часа нет ни одного депа!")
+                stats["last_dep_time"] = now.isoformat()
+                save_stats(stats)
+        except:
+            pass
 
 def full_stats_text():
     reset_if_new_day()
@@ -92,6 +94,7 @@ def full_stats_text():
 
 @app.route('/postback', methods=['GET', 'POST'])
 def postback():
+    global stats
     reset_if_new_day()
     check_alerts()
     
@@ -113,7 +116,6 @@ def postback():
     except:
         rev = 0.0
     
-    # Обновляем время последнего депа
     stats["last_dep_time"] = datetime.now().isoformat()
     
     stats["today_deps"] += 1
@@ -121,30 +123,25 @@ def postback():
     stats["total_deps"] += 1
     stats["total_sum"] += rev
     
-    # Кампании
     if campaign not in stats["campaigns"]:
         stats["campaigns"][campaign] = {"count": 0, "sum": 0.0}
     stats["campaigns"][campaign]["count"] += 1
     stats["campaigns"][campaign]["sum"] += rev
     
-    # Офферы
     if offer not in stats["offers"]:
         stats["offers"][offer] = {"count": 0, "sum": 0.0}
     stats["offers"][offer]["count"] += 1
     stats["offers"][offer]["sum"] += rev
     
-    # Кабинеты + проверка на просадку
     if cabinet not in stats["cabs"]:
         stats["cabs"][cabinet] = {"count": 0, "sum": 0.0}
-    old_count = stats["cabs"][cabinet]["count"]
     stats["cabs"][cabinet]["count"] += 1
     stats["cabs"][cabinet]["sum"] += rev
     
-    # Простая проверка просадки (если раньше было много, а сейчас мало)
     if cabinet not in stats["cab_history"]:
         stats["cab_history"][cabinet] = []
     stats["cab_history"][cabinet].append(stats["cabs"][cabinet]["count"])
-    if len(stats["cab_history"][cabinet]) > 5:
+    if len(stats["cab_history"][cabinet]) > 6:
         recent = stats["cab_history"][cabinet][-3:]
         older = stats["cab_history"][cabinet][-6:-3]
         if older and sum(older) > 5 and sum(recent) < sum(older) * 0.4:
@@ -183,6 +180,7 @@ def postback():
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
+    global stats
     update = request.json
     if 'message' not in update:
         return "ok"
@@ -205,38 +203,37 @@ def webhook():
         msg = "🏢 <b>По кампаниям:</b>\n\n"
         for camp, data in sorted(stats.get("campaigns", {}).items(), key=lambda x: x[1]["sum"], reverse=True):
             msg += f"<b>{camp}</b>: {data['count']} / {data['sum']:.2f}\n"
-        send_message(msg or "Пока пусто", get_keyboard())
+        send_message(msg if stats.get("campaigns") else "Пока пусто", get_keyboard())
     
     elif text in ['Офферы', '/offers']:
         msg = "🎯 <b>По офферам:</b>\n\n"
         for off, data in sorted(stats.get("offers", {}).items(), key=lambda x: x[1]["sum"], reverse=True):
             msg += f"<b>{off}</b>: {data['count']} / {data['sum']:.2f}\n"
-        send_message(msg or "Пока пусто", get_keyboard())
+        send_message(msg if stats.get("offers") else "Пока пусто", get_keyboard())
     
     elif text in ['Кабинеты', '/cabs']:
         msg = "📊 <b>По кабинетам:</b>\n\n"
         for cab, data in sorted(stats.get("cabs", {}).items(), key=lambda x: x[1]["sum"], reverse=True):
             msg += f"<b>{cab}</b>: {data['count']} / {data['sum']:.2f}\n"
-        send_message(msg or "Пока пусто", get_keyboard())
+        send_message(msg if stats.get("cabs") else "Пока пусто", get_keyboard())
     
     elif text in ['Крео', '/creos']:
         msg = "🎨 <b>По крео:</b>\n\n"
         for creo, data in sorted(stats.get("creos", {}).items(), key=lambda x: x[1]["sum"], reverse=True)[:15]:
             msg += f"<b>{creo}</b>: {data['count']} / {data['sum']:.2f}\n"
-        send_message(msg or "Пока пусто", get_keyboard())
+        send_message(msg if stats.get("creos") else "Пока пусто", get_keyboard())
     
     elif text in ['Очистить', '/clear']:
-        new_stats = load_stats()
-        new_stats["cabs"] = {}
-        new_stats["creos"] = {}
-        new_stats["campaigns"] = {}
-        new_stats["offers"] = {}
-        new_stats["statuses"] = {}
-        new_stats["cab_history"] = {}
-        new_stats["last_dep_time"] = None
-        save_stats(new_stats)
-        global stats
-        stats = new_stats
+        stats = {
+            "today_deps": 0, "today_sum": 0.0,
+            "total_deps": 0, "total_sum": 0.0,
+            "last_reset": str(date.today()),
+            "cabs": {}, "creos": {}, "statuses": {}, "dolets": 0,
+            "campaigns": {}, "offers": {},
+            "last_dep_time": None,
+            "cab_history": {}
+        }
+        save_stats(stats)
         send_message("✅ Статистика очищена", get_keyboard())
     
     return "ok"
